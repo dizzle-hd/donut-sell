@@ -24,9 +24,11 @@ Slots that hold other items (sword, pickaxe, …) are **never touched**. You can
 | Sell | Max. listings per run (0 = unlimited) | 0 |
 | Sell | Auto-confirm the confirmation menu + confirm words | on |
 | Sell | Stop words in chat (e.g. limit reached) | `maximum, limit, …` |
+| Sell | Throttle words in chat (`too fast`, `cooldown`, …): pause 2.5 s, retry and slow down instead of stopping | on |
 | Hotbar | Allowed slots | `1-9` |
 | Hotbar | Random slot order | off |
-| Timing | Pauses (min/max, randomized) for clicks, slot switches and after each sale | 180–380 / 250–500 / 900–1600 ms |
+| Timing | **Speed**: Fast (≈0.5 s per listing) / Normal / Careful / Custom | Fast |
+| Timing | Custom pauses (min/max, randomized), only used with "Custom" | 180–380 / 250–500 / 900–1600 ms |
 | Safety | AFK protection (no mouse movement → stop) | 45 s |
 | Safety | Stop when the window loses focus | on |
 | Safety | Stop on movement (WASD, jump, attack, use, drop) | on |
@@ -42,7 +44,7 @@ Put these in the `mods` folder (OneClient usually brings all of them except this
 - Fabric Loader ≥ 0.19.5 for Minecraft 26.3
 - Fabric API
 - OneConfig ≥ 1.4.4 (plus its dependencies: Fabric Language Kotlin, Compose Multiplatform)
-- `donut-sell-1.0.0.jar`
+- `donut-sell-<version>.jar`
 
 ## Download
 

@@ -39,8 +39,16 @@ public final class AutoSeller {
     /** InventoryMenu: slots 9..35 are the main inventory with the same index as {@link Inventory}. */
     private static final int MAIN_INV_START = 9;
     private static final int MAIN_INV_END = 35;
-    private static final long CONFIRM_WAIT_MS = 2500;
-    private static final long SOLD_CHECK_TIMEOUT_MS = 4000;
+    private static final long CONFIRM_WAIT_MS = 1500;
+    private static final long SOLD_CHECK_TIMEOUT_MS = 3000;
+    private static final long THROTTLE_PAUSE_MS = 2500;
+
+    /** {clickMin, clickMax, switchMin, switchMax, sellMin, sellMax} in ms for Schnell / Normal / Vorsichtig. */
+    private static final int[][] PRESETS = {
+        {55, 110, 60, 130, 220, 420},
+        {110, 210, 140, 260, 450, 800},
+        {180, 380, 250, 500, 900, 1600},
+    };
     private static final Set<String> CONFIRM_ITEMS = Set.of(
         "minecraft:lime_stained_glass_pane", "minecraft:green_stained_glass_pane",
         "minecraft:lime_stained_glass", "minecraft:green_stained_glass",
@@ -73,6 +81,7 @@ public final class AutoSeller {
     private final List<Integer> sellQueue = new ArrayList<>();
     private int currentSlot = -1;
     private boolean commandSent;
+    private double slowdown = 1.0; // grows when the server says we are too fast
 
     // presence tracking
     private double lastMouseX = Double.NaN, lastMouseY = Double.NaN;
@@ -120,6 +129,7 @@ public final class AutoSeller {
         }
         listings = 0;
         failedInARow = 0;
+        slowdown = 1.0;
         originalSlot = mc.player.getInventory().getSelectedSlot();
         resetPresence(mc);
         info("Starte: " + itemId + " für $" + Prices.pretty(basePrice)
@@ -149,6 +159,22 @@ public final class AutoSeller {
     public void onChatMessage(String plain) {
         if (!isRunning() || state == State.WAIT_FOR_SCREEN_CLOSE) return;
         String lower = plain.toLowerCase(Locale.ROOT);
+        for (String word : words(DonutSellConfig.throttleWords)) {
+            if (lower.contains(word)) {
+                slowdown = Math.min(3.0, slowdown * 1.3);
+                if ((state == State.SELL_WAIT || state == State.SELL_AFTER) && currentSlot >= 0) {
+                    // the listing was refused: retry the same slot after the pause
+                    sellQueue.addFirst(currentSlot);
+                    commandSent = false;
+                    setState(State.SELL_SELECT, THROTTLE_PAUSE_MS);
+                } else {
+                    nextActionAt = Math.max(nextActionAt, System.currentTimeMillis() + THROTTLE_PAUSE_MS);
+                }
+                failedInARow = 0; // this sale is retried, it is not a rejection
+                info("Server bremst (\"" + word + "\") – kurze Pause, Tempo jetzt ×" + String.format(Locale.ROOT, "%.1f", slowdown), ChatFormatting.YELLOW);
+                return;
+            }
+        }
         for (String word : words(DonutSellConfig.stopWords)) {
             if (lower.contains(word)) {
                 stop("Server-Nachricht enthält \"" + word + "\" → gestoppt");
@@ -173,7 +199,7 @@ public final class AutoSeller {
             case WAIT_FOR_SCREEN_CLOSE -> {
                 if (mc.gui.screen() == null) {
                     resetPresence(mc);
-                    setState(State.PLAN, randomDelay(DonutSellConfig.switchDelayMin, DonutSellConfig.switchDelayMax));
+                    setState(State.PLAN, switchDelay());
                 }
             }
             case PLAN -> plan(mc, player);
@@ -189,7 +215,7 @@ public final class AutoSeller {
             case FILL_CLOSE -> {
                 if (mc.gui.screen() instanceof InventoryScreen) player.closeContainer();
                 buildSellQueue(player);
-                setState(State.SELL_SELECT, randomDelay(DonutSellConfig.switchDelayMin, DonutSellConfig.switchDelayMax));
+                setState(State.SELL_SELECT, switchDelay());
             }
             case SELL_SELECT -> sellSelect(player);
             case SELL_SEND -> sellSend(player);
@@ -276,13 +302,13 @@ public final class AutoSeller {
         Inventory inv = player.getInventory();
         while (!sellQueue.isEmpty() && !matches(inv.getItem(sellQueue.getFirst()))) sellQueue.removeFirst();
         if (sellQueue.isEmpty()) {
-            setState(State.PLAN, randomDelay(DonutSellConfig.switchDelayMin, DonutSellConfig.switchDelayMax));
+            setState(State.PLAN, switchDelay());
             return;
         }
         currentSlot = sellQueue.removeFirst();
         // the carried-item packet is sent by MultiPlayerGameMode on the next tick, like a scroll/number key
         inv.setSelectedSlot(currentSlot);
-        setState(State.SELL_SEND, randomDelay(DonutSellConfig.switchDelayMin, DonutSellConfig.switchDelayMax));
+        setState(State.SELL_SEND, switchDelay());
     }
 
     private void sellSend(LocalPlayer player) {
@@ -308,7 +334,7 @@ public final class AutoSeller {
                 stop("Server hat ein Bestätigungs-Menü geöffnet (Auto-Bestätigen ist aus).");
                 return;
             }
-            setState(State.SELL_CONFIRM_CLICK, clickDelay() + 150);
+            setState(State.SELL_CONFIRM_CLICK, clickDelay() + 40); // let the menu render, like a player would
             return;
         }
         if (screen != null) {
@@ -356,7 +382,7 @@ public final class AutoSeller {
             return;
         }
         commandSent = false;
-        setState(State.SELL_SELECT, randomDelay(DonutSellConfig.sellDelayMin, DonutSellConfig.sellDelayMax));
+        setState(State.SELL_SELECT, sellDelay());
     }
 
     // ------------------------------------------------------------------ presence / safety
@@ -516,8 +542,25 @@ public final class AutoSeller {
         nextActionAt = stateSince;
     }
 
-    private static long clickDelay() {
-        return randomDelay(DonutSellConfig.clickDelayMin, DonutSellConfig.clickDelayMax);
+    private long clickDelay() {
+        return timing(0, DonutSellConfig.clickDelayMin, DonutSellConfig.clickDelayMax);
+    }
+
+    private long switchDelay() {
+        return timing(2, DonutSellConfig.switchDelayMin, DonutSellConfig.switchDelayMax);
+    }
+
+    private long sellDelay() {
+        return timing(4, DonutSellConfig.sellDelayMin, DonutSellConfig.sellDelayMax);
+    }
+
+    /** Random delay from the selected speed preset (or the custom values), scaled by the server slowdown. */
+    private long timing(int presetIndex, int customMin, int customMax) {
+        int preset = DonutSellConfig.speedPreset;
+        long base = preset >= 0 && preset < PRESETS.length
+            ? randomDelay(PRESETS[preset][presetIndex], PRESETS[preset][presetIndex + 1])
+            : randomDelay(customMin, customMax);
+        return Math.round(base * slowdown);
     }
 
     private static long randomDelay(int min, int max) {

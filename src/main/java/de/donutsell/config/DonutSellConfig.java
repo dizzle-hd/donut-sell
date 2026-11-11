@@ -93,7 +93,16 @@ public class DonutSellConfig extends Config {
         category = "Verkauf",
         subcategory = "Server"
     )
-    public static String stopWords = "maximum, limit, reached, can't, cannot, not allowed, too fast, slow down";
+    public static String stopWords = "maximum, limit, reached, can't, cannot, not allowed";
+
+    @Text(
+        title = "Brems-Wörter im Chat",
+        description = "Meldet der Server so etwas (z. B. \"too fast\"), wird nicht gestoppt, sondern kurz pausiert "
+            + "und für den Rest des Durchlaufs etwas langsamer gemacht. Kommagetrennt.",
+        category = "Verkauf",
+        subcategory = "Server"
+    )
+    public static String throttleWords = "too fast, slow down, cooldown, please wait, zu schnell, warte";
 
     // ---------------------------------------------------------------- Hotbar
 
@@ -116,8 +125,18 @@ public class DonutSellConfig extends Config {
 
     // ---------------------------------------------------------------- Timing
 
+    @Dropdown(
+        title = "Geschwindigkeit",
+        description = "Schnell ≈ 0,5 s pro Angebot (wie ein schneller Spieler). "
+            + "\"Eigene\" benutzt die Pausen unten.",
+        category = "Timing",
+        subcategory = "Tempo",
+        options = {"Schnell", "Normal", "Vorsichtig", "Eigene Werte"}
+    )
+    public static int speedPreset = 0;
+
     @Number(title = "Klick-Pause min.", unit = "ms", category = "Timing", subcategory = "Inventar",
-        description = "Pause zwischen zwei Inventar-Klicks beim Auffüllen der Hotbar.", min = 50f, max = 2000f)
+        description = "Nur bei Geschwindigkeit \"Eigene Werte\". Pause zwischen zwei Inventar-Klicks beim Auffüllen der Hotbar.", min = 50f, max = 2000f)
     public static int clickDelayMin = 180;
 
     @Number(title = "Klick-Pause max.", unit = "ms", category = "Timing", subcategory = "Inventar", min = 50f, max = 3000f)
