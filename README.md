@@ -48,7 +48,7 @@ Put these in the `mods` folder (OneClient usually brings all of them except this
 
 ## Download
 
-Every push to the default branch is built automatically by GitHub Actions (`.github/workflows/build.yml`) and published as a **GitHub release** with the finished jar (see Releases in the repo). Every other branch and every pull request gets the jar as a workflow artifact.
+Every push to `main` is built automatically by GitHub Actions (`.github/workflows/build.yml`) and published as a **GitHub release** with the finished jar (see Releases in the repo). Every other branch and every pull request gets the jar as a workflow artifact.
 
 ## Building
 
