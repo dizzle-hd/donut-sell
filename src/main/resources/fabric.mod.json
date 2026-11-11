@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "donutsell",
+  "version": "${version}",
+  "name": "Donut Sell",
+  "description": "Verkauft ein gewähltes Item Slot für Slot über /ah sell – einstellbar in OneConfig (Rechts-Shift). Nur benutzen, während du am PC sitzt.",
+  "authors": ["dizzle-hd"],
+  "license": "MIT",
+  "icon": "assets/donutsell/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["de.donutsell.DonutSellClient"],
+    "oneconfig:config": ["de.donutsell.config.DonutSellConfigEntrypoint"]
+  },
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "minecraft": "~${minecraft_version}",
+    "java": ">=25",
+    "fabric-api": "*",
+    "oneconfig": ">=1.4.4"
+  }
+}
