@@ -40,11 +40,22 @@ jobs:
             !build/libs/*-sources.jar
           if-no-files-found: error
 
-      - name: Publish release (on tag v*)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Read mod version
+        id: version
+        run: echo "mod_version=$(grep '^mod_version=' gradle.properties | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+
+      # Every push to the default branch (and every v* tag) publishes a GitHub release with the jar.
+      - name: Publish release
+        if: >-
+          github.event_name == 'push' &&
+          (startsWith(github.ref, 'refs/tags/v') ||
+           github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            build/libs/donut-sell-*.jar
-            !build/libs/*-sources.jar
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}-build.{1}', steps.version.outputs.mod_version, github.run_number) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('Donut Sell {0} (Build {1})', steps.version.outputs.mod_version, github.run_number) }}
+          target_commitish: ${{ github.sha }}
+          make_latest: "true"
           generate_release_notes: true
+          files: build/libs/donut-sell-${{ steps.version.outputs.mod_version }}.jar
+          fail_on_unmatched_files: true
