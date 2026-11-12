@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -39,9 +41,15 @@ public final class AutoSeller {
     /** InventoryMenu: slots 9..35 are the main inventory with the same index as {@link Inventory}. */
     private static final int MAIN_INV_START = 9;
     private static final int MAIN_INV_END = 35;
-    private static final long CONFIRM_WAIT_MS = 1500;
-    private static final long SOLD_CHECK_TIMEOUT_MS = 3000;
-    private static final long THROTTLE_PAUSE_MS = 2500;
+    /** Total time the server gets to take the item after /ah sell (or after the confirm click). */
+    private static final long SOLD_TIMEOUT_MS = 2500;
+    /** Only server messages this soon after our own /ah sell are treated as its answer. */
+    private static final long REPLY_WINDOW_MS = 2000;
+    private static final long THROTTLE_PAUSE_MS = 1500;
+    private static final double MAX_SLOWDOWN = 1.6;
+    /** "Name: text", "[Rank] Name » text", "Name > text" … i.e. a message written by a player. */
+    private static final Pattern PLAYER_CHAT = Pattern.compile("^(\\[[^\\]]{1,24}\\]\\s*)*(?<name>[^\\s:»>]{1,40})\\s*(:|»|>>|>)\\s");
+    private static final Pattern SECONDS = Pattern.compile("(\\d+(?:[.,]\\d+)?)\\s*(s\\b|sec|second|sek)");
 
     /** {clickMin, clickMax, switchMin, switchMax, sellMin, sellMax} in ms for Schnell / Normal / Vorsichtig. */
     private static final int[][] PRESETS = {
@@ -81,7 +89,9 @@ public final class AutoSeller {
     private final List<Integer> sellQueue = new ArrayList<>();
     private int currentSlot = -1;
     private boolean commandSent;
-    private double slowdown = 1.0; // grows when the server says we are too fast
+    private double slowdown = 1.0; // grows (a little) when the server says we are too fast
+    private long lastCommandAt;      // when the last /ah sell was sent
+    private long listingStartedAt;   // when work on the current listing began (for the timing display)
 
     // presence tracking
     private double lastMouseX = Double.NaN, lastMouseY = Double.NaN;
@@ -130,6 +140,7 @@ public final class AutoSeller {
         listings = 0;
         failedInARow = 0;
         slowdown = 1.0;
+        lastCommandAt = 0;
         originalSlot = mc.player.getInventory().getSelectedSlot();
         resetPresence(mc);
         info("Starte: " + itemId + " für $" + Prices.pretty(basePrice)
@@ -158,26 +169,40 @@ public final class AutoSeller {
 
     public void onChatMessage(String plain) {
         if (!isRunning() || state == State.WAIT_FOR_SCREEN_CLOSE) return;
+        long now = System.currentTimeMillis();
+        // Only the server's direct answer to our own command counts. On big servers player chat
+        // also arrives as system messages, and words like "wait" or "limit" in it must not
+        // pause or stop the seller.
+        if (lastCommandAt == 0 || now - lastCommandAt > REPLY_WINDOW_MS) return;
+        if (isPlayerChat(plain)) return;
+        debug("Server: " + plain);
         String lower = plain.toLowerCase(Locale.ROOT);
         for (String word : words(DonutSellConfig.throttleWords)) {
             if (lower.contains(word)) {
-                slowdown = Math.min(3.0, slowdown * 1.3);
-                if ((state == State.SELL_WAIT || state == State.SELL_AFTER) && currentSlot >= 0) {
-                    // the listing was refused: retry the same slot after the pause
-                    sellQueue.addFirst(currentSlot);
-                    commandSent = false;
-                    setState(State.SELL_SELECT, THROTTLE_PAUSE_MS);
-                } else {
-                    nextActionAt = Math.max(nextActionAt, System.currentTimeMillis() + THROTTLE_PAUSE_MS);
+                slowdown = Math.min(MAX_SLOWDOWN, slowdown * 1.15);
+                long pause = THROTTLE_PAUSE_MS;
+                Matcher m = SECONDS.matcher(lower);
+                if (m.find()) {
+                    // "please wait 3 seconds" → wait exactly that long (+ a little)
+                    try {
+                        pause = Math.min(30_000, Math.round(Double.parseDouble(m.group(1).replace(',', '.')) * 1000) + 250);
+                    } catch (NumberFormatException ignored) {
+                    }
                 }
-                failedInARow = 0; // this sale is retried, it is not a rejection
-                info("Server bremst (\"" + word + "\") – kurze Pause, Tempo jetzt ×" + String.format(Locale.ROOT, "%.1f", slowdown), ChatFormatting.YELLOW);
+                if ((state == State.SELL_WAIT || state == State.SELL_AFTER || state == State.SELL_CONFIRM_CLICK) && currentSlot >= 0) {
+                    sellQueue.addFirst(currentSlot); // the listing was refused: retry the same slot
+                    commandSent = false;
+                }
+                setState(State.SELL_SELECT, pause);
+                lastCommandAt = 0;
+                failedInARow = 0;
+                info("Server bremst (\"" + word + "\") – " + pause + " ms Pause", ChatFormatting.YELLOW);
                 return;
             }
         }
         for (String word : words(DonutSellConfig.stopWords)) {
             if (lower.contains(word)) {
-                stop("Server-Nachricht enthält \"" + word + "\" → gestoppt");
+                stop("Server-Antwort enthält \"" + word + "\" → gestoppt");
                 return;
             }
         }
@@ -306,6 +331,7 @@ public final class AutoSeller {
             return;
         }
         currentSlot = sellQueue.removeFirst();
+        listingStartedAt = System.currentTimeMillis();
         // the carried-item packet is sent by MultiPlayerGameMode on the next tick, like a scroll/number key
         inv.setSelectedSlot(currentSlot);
         setState(State.SELL_SEND, switchDelay());
@@ -323,6 +349,8 @@ public final class AutoSeller {
         if (command.startsWith("/")) command = command.substring(1);
         command = command.replace("{price}", Long.toString(price));
         player.connection.sendCommand(command);
+        lastCommandAt = System.currentTimeMillis();
+        debug("/" + command + " (Slot " + (currentSlot + 1) + ")");
         commandSent = true;
         setState(State.SELL_WAIT, 0);
     }
@@ -342,7 +370,7 @@ public final class AutoSeller {
             return;
         }
         // no confirm menu: the listing is done once the stack left the slot
-        if (player.getInventory().getItem(currentSlot).isEmpty() || now - stateSince > CONFIRM_WAIT_MS) {
+        if (!matches(player.getInventory().getItem(currentSlot)) || now - stateSince > SOLD_TIMEOUT_MS) {
             setState(State.SELL_AFTER, 0);
         }
     }
@@ -359,6 +387,7 @@ public final class AutoSeller {
             stop("Bestätigen-Knopf nicht gefunden – passe die Bestätigen-Wörter an.");
             return;
         }
+        debug("Bestätige: " + target.getItem().getHoverName().getString());
         mc.gameMode.handleContainerInput(menu.containerId, target.index, 0, ContainerInput.PICKUP, player);
         setState(State.SELL_AFTER, 0);
     }
@@ -366,22 +395,29 @@ public final class AutoSeller {
     private void sellAfter(Minecraft mc, LocalPlayer player, long now) {
         Screen screen = mc.gui.screen();
         boolean sold = !matches(player.getInventory().getItem(currentSlot));
-        if (!sold && now - stateSince < SOLD_CHECK_TIMEOUT_MS) return; // wait for the server to take the item
+        boolean timedOut = now - stateSince > SOLD_TIMEOUT_MS;
+        if (!sold && !timedOut) return; // wait for the server to take the item
 
         if (screen instanceof AbstractContainerScreen<?> && !(screen instanceof InventoryScreen)) {
-            if (now - stateSince < SOLD_CHECK_TIMEOUT_MS) return; // menu still closing
+            // a menu the server left open after the listing: close it right away
             player.closeContainer();
         }
+        long took = now - listingStartedAt;
         if (sold) {
             listings++;
             failedInARow = 0;
-            player.sendOverlayMessage(Component.literal("Donut Sell: " + listings + " Angebot" + (listings == 1 ? "" : "e"))
-                .withStyle(ChatFormatting.GREEN));
-        } else if (commandSent && ++failedInARow >= 2) {
-            stop("Item wurde zweimal nicht angenommen (Limit erreicht?)");
-            return;
+            player.sendOverlayMessage(Component.literal("Donut Sell: " + listings + " Angebot" + (listings == 1 ? "" : "e")
+                + " (" + took + " ms)").withStyle(ChatFormatting.GREEN));
+            debug("Verkauft in " + took + " ms");
+        } else {
+            debug("Nicht verkauft nach " + took + " ms");
+            if (commandSent && ++failedInARow >= 2) {
+                stop("Item wurde zweimal nicht angenommen (Limit erreicht?)");
+                return;
+            }
         }
         commandSent = false;
+        lastCommandAt = 0;
         setState(State.SELL_SELECT, sellDelay());
     }
 
@@ -566,6 +602,18 @@ public final class AutoSeller {
     private static long randomDelay(int min, int max) {
         int lo = Math.max(0, Math.min(min, max)), hi = Math.max(min, max);
         return lo == hi ? lo : ThreadLocalRandom.current().nextLong(lo, hi + 1L);
+    }
+
+    /** True for "Name: text"-style player chat; ALL-CAPS prefixes like "AUCTION »" are server messages. */
+    static boolean isPlayerChat(String plain) {
+        Matcher m = PLAYER_CHAT.matcher(plain);
+        if (!m.find()) return false;
+        String name = m.group("name");
+        return !(name.chars().anyMatch(Character::isLetter) && name.equals(name.toUpperCase(Locale.ROOT)));
+    }
+
+    private static void debug(String text) {
+        if (DonutSellConfig.debug) info("[Diagnose " + (System.currentTimeMillis() % 100_000) + "] " + text, ChatFormatting.GRAY);
     }
 
     private static void info(String text, ChatFormatting colour) {
