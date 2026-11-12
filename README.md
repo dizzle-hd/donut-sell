@@ -23,8 +23,8 @@ Slots that hold other items (sword, pickaxe, …) are **never touched**. You can
 | Sell | Sell command (`{price}` gets replaced) | `ah sell {price}` |
 | Sell | Max. listings per run (0 = unlimited) | 0 |
 | Sell | Auto-confirm the confirmation menu + confirm words | on |
-| Sell | Stop words in chat (e.g. limit reached) | `maximum, limit, …` |
-| Sell | Throttle words in chat (`too fast`, `cooldown`, …): pause 2.5 s, retry and slow down instead of stopping | on |
+| Sell | Stop words (e.g. limit reached) | `maximum, limit, …` |
+| Sell | Throttle words (`too fast`, `cooldown`, …): pause (as long as the server asks, otherwise 1.5 s), then retry | on |
 | Hotbar | Allowed slots | `1-9` |
 | Hotbar | Random slot order | off |
 | Timing | **Speed**: Fast (≈0.5 s per listing) / Normal / Careful / Custom | Fast |
@@ -32,6 +32,9 @@ Slots that hold other items (sword, pickaxe, …) are **never touched**. You can
 | Safety | AFK protection (no mouse movement → stop) | 45 s |
 | Safety | Stop when the window loses focus | on |
 | Safety | Stop on movement (WASD, jump, attack, use, drop) | on |
+| Safety | Diagnostics in chat (each step with timestamp + server reply) | off |
+
+Stop and throttle words only apply to the server's direct reply to `/ah sell` (within 2 s). Normal player chat is ignored.
 
 **Start/stop:** use the **K** key (rebindable under Options → Controls → Donut Sell), or the Start button in the OneConfig menu. A run started from the menu begins once you close the menu.
 

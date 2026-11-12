@@ -88,8 +88,8 @@ public class DonutSellConfig extends Config {
 
     @Text(
         title = "Stopp-Wörter im Chat",
-        description = "Kommt eine Server-Nachricht mit einem dieser Wörter, wird sofort gestoppt "
-            + "(z. B. Angebots-Limit erreicht). Kommagetrennt.",
+        description = "Antwortet der Server auf /ah sell mit einem dieser Wörter, wird sofort gestoppt "
+            + "(z. B. Angebots-Limit erreicht). Normaler Spieler-Chat wird ignoriert. Kommagetrennt.",
         category = "Verkauf",
         subcategory = "Server"
     )
@@ -184,6 +184,15 @@ public class DonutSellConfig extends Config {
         subcategory = "Anwesenheit"
     )
     public static boolean stopOnMovement = true;
+
+    @Switch(
+        title = "Diagnose im Chat",
+        description = "Zeigt jeden Schritt mit Zeitstempel und die Server-Antwort auf /ah sell im Chat. "
+            + "Hilfreich, wenn etwas zu langsam ist oder hängt.",
+        category = "Sicherheit",
+        subcategory = "Fehlersuche"
+    )
+    public static boolean debug = false;
 
     // ---------------------------------------------------------------- Buttons
 
